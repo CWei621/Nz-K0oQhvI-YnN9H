@@ -8,12 +8,12 @@ export function useProducts() {
 
     const getProducts = async () => {
         const response = await axios.get('/products')
-        products.value = response.data
+        products.value = response.data.data
     }
 
     const getProduct = async (id) => {
         const response = await axios.get(`/products/${id}`)
-        return response.data
+        return response.data.data
     }
 
     const deleteProduct = async (id) => {

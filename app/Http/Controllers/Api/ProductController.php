@@ -1,102 +1,149 @@
 <?php
-// app/Http/Controllers/Api/ProductController.php
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\Product;
-use Illuminate\Http\Request;
+use App\Http\Requests\StoreProductRequest;
+use App\Http\Requests\UpdateProductRequest;
+use App\Http\Resources\ProductResource;
+use App\Repositories\ProductRepository;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Storage;
-use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\File;
+use Symfony\Component\HttpFoundation\Response;
+use App\Traits\ApiResponse;
 
 class ProductController extends Controller
 {
+    use ApiResponse;
+
+    protected $productRepository;
+
+    public function __construct(ProductRepository $productRepository)
+    {
+        $this->productRepository = $productRepository;
+    }
+
     public function index()
     {
-        return Product::all();
+        $products = Cache::remember('products.all', 3600, function () {
+            return $this->productRepository->all();
+        });
+
+        return $this->success(ProductResource::collection($products));
     }
 
-    public function store(Request $request)
+    public function store(StoreProductRequest $request)
     {
-        // Debug uploaded file
-        Log::info('File Upload Debug:', [
-            'hasFile' => $request->hasFile('image'),
-            'files' => $request->allFiles(),
-            'fileName' => $request->file('image')?->getClientOriginalName(),
-            'mimeType' => $request->file('image')?->getMimeType(),
-        ]);
-
-        $validated = $request->validate([
-            'name' => 'required|string|max:255',
-            'description' => 'nullable|string',
-            'price' => 'required|numeric|min:0',
-            'stock' => 'required|integer|min:0',
-            'image' => 'nullable|image|mimes:jpeg,png,jpg,gif|max:2048',
-            'is_active' => 'boolean'
-        ]);
+        $validated = $request->validated();
 
         if ($request->hasFile('image')) {
-            $image = $request->file('image');
-            $filename = time() . '.' . $image->getClientOriginalExtension();
-
-            $path = $image->storeAs('products', $filename, 'public');
-            $validated['image_path'] = 'storage/' . $path;
+            $validated['image_path'] = $this->handleImageUpload($request->file('image'));
         }
 
-        return Product::create($validated);
+        $product = $this->productRepository->create($validated);
+        $this->clearProductCaches();
+
+        return $this->success(new ProductResource($product), 201);
     }
 
-    public function show(Product $product)
+    public function show(int $id)
     {
-        return $product;
+        $product = Cache::remember("products.{$id}", 3600, function () use ($id) {
+            return $this->productRepository->findOrFail($id);
+        });
+
+        return $this->success(new ProductResource($product));
     }
 
-    public function update(Request $request, Product $product)
+    public function update(UpdateProductRequest $request, int $id)
     {
-        $validated = $request->validate([
-            'name' => 'sometimes|string|max:255',
-            'description' => 'nullable|string',
-            'price' => 'sometimes|numeric|min:0',
-            'stock' => 'sometimes|integer|min:0',
-            'image' => 'nullable|image|mimes:jpeg,png,jpg,gif|max:2048',
-            'is_active' => 'boolean'
-        ]);
+        $product = $this->productRepository->findOrFail($id);
+        $validated = $request->validated();
 
         if ($request->hasFile('image')) {
-            // Delete old image if exists
-            if ($product->image_path && Storage::disk('public')->exists(str_replace('storage/', '', $product->image_path))) {
-                Storage::disk('public')->delete(str_replace('storage/', '', $product->image_path));
-            }
-
-            // Store new image
-            $image = $request->file('image');
-            $filename = time() . '.' . $image->getClientOriginalExtension();
-            $path = $image->storeAs('products', $filename, 'public');
-            $validated['image_path'] = 'storage/' . $path;
+            $this->deleteOldImage($product->image_path);
+            $validated['image_path'] = $this->handleImageUpload($request->file('image'));
         }
 
-        $product->update($validated);
-        return $product;
+        $product = $this->productRepository->update($id, $validated);
+        $this->clearProductCaches($id);
+
+        return $this->success(new ProductResource($product));
     }
 
-    public function destroy(Product $product)
+    public function destroy(int $id)
     {
-        $product->delete();
-        return response()->noContent();
+        $product = $this->productRepository->findOrFail($id);
+
+        if ($product->image_path) {
+            $this->deleteOldImage($product->image_path);
+        }
+
+        $this->productRepository->delete($id);
+        $this->clearProductCaches($id);
+
+        return $this->success(null, 204);
     }
 
-    public function getImage($filename)
+    public function getImage(string $filename)
     {
-        $path = 'products/' . $filename;
+        $filename = basename($filename);
+        $cacheKey = "product.image.{$filename}";
+
+        $product = Cache::remember($cacheKey, 3600, function () use ($filename) {
+            return $this->productRepository->findByImage($filename);
+        });
+
+        if (!$product) {
+            return response()->json(['message' => '圖片不存在'], Response::HTTP_NOT_FOUND);
+        }
+
+        $path = "products/{$filename}";
 
         if (!Storage::disk('public')->exists($path)) {
-            return response()->json(['message' => 'Image not found'], 404);
+            Cache::forget($cacheKey);
+            return response()->json(['message' => '圖片遺失'], Response::HTTP_NOT_FOUND);
         }
 
-        $file = Storage::disk('public')->get($path);
-        $type = Storage::disk('public')->mimeType($path);
+        $lastModified = Storage::disk('public')->lastModified($path);
+        $etag = md5($lastModified . $filename);
 
-        return response($file, 200)
-            ->header('Content-Type', $type)
-            ->header('Cache-Control', 'public, max-age=86400');
+        if (request()->header('If-None-Match') === $etag) {
+            return response()->noContent(Response::HTTP_NOT_MODIFIED);
+        }
+
+        return response(Storage::disk('public')->get($path))
+            ->header('Content-Type', File::mimeType(Storage::disk('public')->path($path)))
+            ->header('Cache-Control', 'public, max-age=86400')
+            ->header('ETag', $etag)
+            ->header('Last-Modified', gmdate('D, d M Y H:i:s', $lastModified) . ' GMT');
+    }
+
+    protected function handleImageUpload($image): string
+    {
+        $filename = time() . '.' . $image->getClientOriginalExtension();
+        $path = $image->storeAs('products', $filename, 'public');
+        return 'storage/' . $path;
+    }
+
+    protected function deleteOldImage(?string $imagePath): void
+    {
+        if ($imagePath && Storage::disk('public')->exists(str_replace('storage/', '', $imagePath))) {
+            Storage::disk('public')->delete(str_replace('storage/', '', $imagePath));
+        }
+    }
+
+    protected function clearProductCaches(int $id = null): void
+    {
+        Cache::forget('products.all');
+
+        if ($id) {
+            Cache::forget("products.{$id}");
+            $product = $this->productRepository->find($id);
+            if ($product && $product->image_path) {
+                $filename = basename($product->image_path);
+                Cache::forget("product.image.{$filename}");
+            }
+        }
     }
 }

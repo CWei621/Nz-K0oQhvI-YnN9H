@@ -156,10 +156,7 @@ onMounted(async () => {
     if (isEdit.value) {
         try {
             const response = await getProduct(props.id)
-            form.value = {
-                ...response,
-                is_active: response.is_active === 1 || response.is_active === '1'
-            }
+            form.value = response
         } catch (error) {
             console.error('Error fetching product:', error)
             router.push({ name: 'products.index' })
@@ -189,7 +186,7 @@ const storeProduct = async (data) => {
 
 const updateProduct = async (id, data) => {
     try {
-        data.append('_method', 'PUT')  // Laravel PUT 模擬
+        data.append('_method', 'PUT')
         const response = await axios.post(`/products/${id}`, data)
         return response.data
     } catch (e) {
