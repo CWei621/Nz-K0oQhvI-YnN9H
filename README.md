@@ -2,6 +2,17 @@
 
 ## 安裝
 
+### 系統需求
+- Redis Server >= 6.0
+- MySQL/MariaDB >= 8.0
+- PHP >= 8.2
+
+### 套件版本
+- Vue.js v3.5.13
+- Vite v5.4.11
+- TailwindCSS v3.4.15
+- Vue Router v4.5.0
+
 ### 環境變數
 ```
 cp .env.example .env
