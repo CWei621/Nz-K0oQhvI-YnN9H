@@ -5,30 +5,34 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreProductRequest;
 use App\Http\Requests\UpdateProductRequest;
 use App\Http\Resources\ProductResource;
-use App\Repositories\ProductRepository;
+use App\Services\ProductService;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\File;
 use Symfony\Component\HttpFoundation\Response;
 use App\Traits\ApiResponse;
+use App\Services\ProductCacheService;
 
 class ProductController extends Controller
 {
     use ApiResponse;
 
-    protected $productRepository;
+    protected $productService;
+    protected $cacheService;
 
-    public function __construct(ProductRepository $productRepository)
-    {
-        $this->productRepository = $productRepository;
+    public function __construct(
+        ProductService $productService,
+        ProductCacheService $cacheService
+    ) {
+        $this->productService = $productService;
+        $this->cacheService = $cacheService;
     }
 
     public function index()
     {
-        $products = Cache::remember('products.all', 3600, function () {
-            return $this->productRepository->all();
-        });
-
+        $products = $this->cacheService->getAllProducts(
+            fn() => $this->productService->getAllProducts()
+        );
         return $this->success(ProductResource::collection($products));
     }
 
@@ -40,47 +44,49 @@ class ProductController extends Controller
             $validated['image_path'] = $this->handleImageUpload($request->file('image'));
         }
 
-        $product = $this->productRepository->create($validated);
-        $this->clearProductCaches();
+        $product = $this->productService->createProduct($validated);
+        $this->cacheService->clearProductCaches();
 
         return $this->success(new ProductResource($product), 201);
     }
 
     public function show(int $id)
     {
-        $product = Cache::remember("products.{$id}", 3600, function () use ($id) {
-            return $this->productRepository->findOrFail($id);
-        });
-
+        $product = $this->cacheService->getProduct($id,
+            fn() => $this->productService->getProduct($id)
+        );
         return $this->success(new ProductResource($product));
     }
 
     public function update(UpdateProductRequest $request, int $id)
     {
-        $product = $this->productRepository->findOrFail($id);
+        $product = $this->productService->getProduct($id);
         $validated = $request->validated();
 
         if ($request->hasFile('image')) {
+            $oldImage = basename($product->image_path);
             $this->deleteOldImage($product->image_path);
             $validated['image_path'] = $this->handleImageUpload($request->file('image'));
+            $this->cacheService->clearProductImageCache($oldImage);
         }
 
-        $product = $this->productRepository->update($id, $validated);
-        $this->clearProductCaches($id);
+        $product = $this->productService->updateProduct($id, $validated);
+        $this->cacheService->clearProductCaches($id);
 
         return $this->success(new ProductResource($product));
     }
 
     public function destroy(int $id)
     {
-        $product = $this->productRepository->findOrFail($id);
-
+        $product = $this->productService->getProduct($id);
         if ($product->image_path) {
+            $filename = basename($product->image_path);
             $this->deleteOldImage($product->image_path);
+            $this->cacheService->clearProductImageCache($filename);
         }
 
-        $this->productRepository->delete($id);
-        $this->clearProductCaches($id);
+        $this->cacheService->clearProductCaches($id);
+        $this->productService->deleteProduct($id);
 
         return $this->success(null, 204);
     }
@@ -88,11 +94,10 @@ class ProductController extends Controller
     public function getImage(string $filename)
     {
         $filename = basename($filename);
-        $cacheKey = "product.image.{$filename}";
 
-        $product = Cache::remember($cacheKey, 3600, function () use ($filename) {
-            return $this->productRepository->findByImage($filename);
-        });
+        $product = $this->cacheService->getProductImage($filename,
+            fn() => $this->productService->findProductByImage($filename)
+        );
 
         if (!$product) {
             return response()->json(['message' => '圖片不存在'], Response::HTTP_NOT_FOUND);
@@ -101,7 +106,7 @@ class ProductController extends Controller
         $path = "products/{$filename}";
 
         if (!Storage::disk('public')->exists($path)) {
-            Cache::forget($cacheKey);
+            $this->cacheService->clearProductImageCache($filename);
             return response()->json(['message' => '圖片遺失'], Response::HTTP_NOT_FOUND);
         }
 
@@ -119,31 +124,17 @@ class ProductController extends Controller
             ->header('Last-Modified', gmdate('D, d M Y H:i:s', $lastModified) . ' GMT');
     }
 
+    // 保留原有的 handleImageUpload 和 deleteOldImage 方法
     protected function handleImageUpload($image): string
     {
-        $filename = time() . '.' . $image->getClientOriginalExtension();
-        $path = $image->storeAs('products', $filename, 'public');
-        return 'storage/' . $path;
+        $path = $image->store('products', 'public');
+        return asset('storage/' . $path);
     }
 
     protected function deleteOldImage(?string $imagePath): void
     {
         if ($imagePath && Storage::disk('public')->exists(str_replace('storage/', '', $imagePath))) {
             Storage::disk('public')->delete(str_replace('storage/', '', $imagePath));
-        }
-    }
-
-    protected function clearProductCaches(int $id = null): void
-    {
-        Cache::forget('products.all');
-
-        if ($id) {
-            Cache::forget("products.{$id}");
-            $product = $this->productRepository->find($id);
-            if ($product && $product->image_path) {
-                $filename = basename($product->image_path);
-                Cache::forget("product.image.{$filename}");
-            }
         }
     }
 }
