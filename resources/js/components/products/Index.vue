@@ -40,10 +40,11 @@
 </template>
 
 <script setup>
-import { onMounted } from 'vue'
+import { onMounted, onUnmounted, inject } from 'vue'
 import { useProducts } from '../composables/useProducts'
 
 const { products, getProducts, deleteProduct } = useProducts()
+const notify = inject('notify');
 
 const handleDelete = async (product) => {
     if (!confirm(`確定要刪除 ${product.name} ?`)) return
@@ -52,5 +53,17 @@ const handleDelete = async (product) => {
     await getProducts()
 }
 
-onMounted(getProducts)
+onMounted(() => {
+    getProducts()
+
+    window.Echo.channel('products')
+      .listen('ProductEvent', (event) => {
+        const productLink = `/products/${event.product.id}/edit`
+        notify.successWithLink('商品列表已更新', productLink)
+      })
+})
+
+onUnmounted(() => {
+    window.Echo.leave('products')
+})
 </script>

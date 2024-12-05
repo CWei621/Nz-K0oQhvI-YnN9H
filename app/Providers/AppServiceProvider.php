@@ -5,6 +5,8 @@ namespace App\Providers;
 use Illuminate\Support\ServiceProvider;
 use App\Repositories\Interfaces\ProductRepositoryInterface;
 use App\Repositories\ProductRepository;
+use App\Models\Product;
+use App\Observers\ProductObserver;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -21,6 +23,6 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        //
+        Product::observe(ProductObserver::class);
     }
 }
