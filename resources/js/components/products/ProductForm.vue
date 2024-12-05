@@ -68,38 +68,48 @@
                 </label>
             </div>
 
+            <!-- 圖片上傳區域 -->
             <div class="space-y-2">
-              <label class="block text-sm font-medium text-gray-700">商品圖片</label>
+                <label class="block text-sm font-medium text-gray-700">商品圖片</label>
 
-              <!-- Image Preview -->
-              <div v-if="imagePreview || form.image_path" class="mb-4">
-                <img
-                  :src="imagePreview || `/api/products/image/${form.image_path?.split('/').pop()}`"
-                  alt="Product preview"
-                  class="h-32 w-32 object-cover rounded-lg shadow-sm"
-                />
-              </div>
+                <div
+                    class="relative flex flex-col items-center justify-center w-full h-48 border-2 border-gray-300 border-dashed rounded-lg cursor-pointer hover:bg-gray-50 transition-colors"
+                    @dragover.prevent
+                    @drop.prevent="handleDrop"
+                    @click="$refs.fileInput.click()"
+                >
+                    <!-- 預覽圖 -->
+                    <template v-if="imagePreview || form.image_path">
+                        <img
+                            :src="imagePreview || `/api/products/image/${form.image_path?.split('/').pop()}`"
+                            alt="Product preview"
+                            class="absolute inset-0 w-full h-full object-contain p-2"
+                        />
+                        <div class="absolute inset-0 bg-black bg-opacity-40 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity">
+                            <p class="text-white">點擊或拖放更換圖片</p>
+                        </div>
+                    </template>
 
-              <!-- Upload Area -->
-              <div class="flex items-center justify-center w-full">
-                <label class="flex flex-col w-full h-32 border-2 border-gray-300 border-dashed rounded-lg cursor-pointer hover:bg-gray-50">
-                  <div class="flex flex-col items-center justify-center pt-5 pb-6">
-                    <svg class="w-8 h-8 mb-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                    </svg>
-                    <p class="mb-2 text-sm text-gray-500">
-                      <span class="font-semibold">點擊上傳</span>或拖放
-                    </p>
-                    <p class="text-xs text-gray-500">PNG, JPG, GIF</p>
-                  </div>
-                  <input
+                    <!-- 上傳提示 -->
+                    <template v-else>
+                        <svg class="w-8 h-8 mb-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                        </svg>
+                        <p class="mb-2 text-sm text-gray-500">
+                            <span class="font-semibold">點擊上傳</span>或拖放
+                        </p>
+                        <p class="text-xs text-gray-500">PNG, JPG, GIF</p>
+                    </template>
+                </div>
+
+                <!-- 隱藏的檔案輸入 -->
+                <input
+                    ref="fileInput"
                     type="file"
                     class="hidden"
                     accept="image/*"
                     @change="handleImageChange"
-                  />
-                </label>
-              </div>
+                />
             </div>
 
             <!-- 按鈕 -->

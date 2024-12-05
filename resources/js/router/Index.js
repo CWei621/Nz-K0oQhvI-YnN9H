@@ -16,6 +16,11 @@ const routes = [
         path: '/products/:id/edit',
         name: 'products.edit',
         component: () => import('../components/products/Edit.vue')
+    },
+    {
+      path: '/:pathMatch(.*)*',
+      name: 'not-found',
+      component: () => import('../components/NotFound.vue')
     }
 ]
 
